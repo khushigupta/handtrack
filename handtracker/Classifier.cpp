@@ -10,6 +10,7 @@ LcValidator LcValidator::operator +(const LcValidator & a)
 {
 	return LcValidator( a.tp + tp , a.fp + fp , a.fn + fn , a.tn + tn);
 }
+
 void LcValidator::display()
 {
 	//cout << "tp:" << tp << " fp:" << fp << " tn:"<< tn << " fn:" << fn << endl;
@@ -83,6 +84,7 @@ void LcValidator::count( Mat & res, Mat & lab, float th, float & tp, float & fp,
 
 void LcRandomTreesR::train(Mat & feature, Mat & label)
 {
+
 	//_params.max_depth = 10;
 	//_params.regression_accuracy = 0.1f;
 	//_params.use_1se_rule = true;
@@ -118,7 +120,9 @@ LcValidator LcRandomTreesR::predict( Mat & feature, Mat & res, Mat & label)
 		//res.at<float>(i,0) =  _random_tree.predict_prob( feature.row(i) );
 	}
 
-	if( label.rows == feature.rows ) return LcValidator( res, label);
+	if( label.rows == feature.rows ){
+		return LcValidator( res, label);
+	}
 	else return LcValidator();
 }
 
@@ -127,7 +131,6 @@ LcValidator LcRandomTreesR::predict( Mat & feature, Mat & res)
 	Mat label;
 	return predict(feature,res,label);
 }
-
 
 void LcRandomTreesR::save( string filename_prefix ){
 	string filename = filename_prefix + "_rdtr.xml";
@@ -179,6 +182,8 @@ void LcRandomTreesC::train(Mat & feature, Mat & label)		// Multi-class Classifie
 
 LcValidator LcRandomTreesC::predict( Mat & feature, Mat & res, Mat & label)
 {
+	cout << "In Random Trees Predict";
+
 	int n = feature.rows;
 	res = Mat::zeros( n, 1, 5);
 	for(int i = 0; i< n ; i++)
@@ -231,7 +236,13 @@ void LcDecisionTree::train(Mat & feature, Mat & label)
 	
 }
 
-LcValidator LcDecisionTree::predict( Mat & feature, Mat & res, Mat & label)
+LcValidator LcDecisionTree::predict(Mat & feature, Mat & res)
+{
+	Mat label;
+	return predict(feature,res,label);
+}
+
+LcValidator LcDecisionTree::predict(Mat & feature, Mat & res, Mat & label)
 {
 
 	int n = feature.rows;
@@ -371,3 +382,62 @@ void LcKNN::load( string filename_prefix ){
 	string label_name = filename_prefix + "_knn_lab.bin";
 	lc::LcBin2Mat( label_name.c_str(), _lab);
 }
+
+//==============================
+
+// void LcSVM::train( Mat & feature, Mat & label)
+// {
+
+//     _params.svm_type    = CvSVM::C_SVC;
+//     _params.kernel_type = CvSVM::LINEAR;
+//     _params.term_crit   = cvTermCriteria(CV_TERMCRIT_ITER, 100, 1e-6);
+    
+//     double t = (double)getTickCount();
+//     if(veb) cout << "Train SVM model ...";
+    
+//     _SVM.train(feature, label, Mat(), Mat(), _params);
+    
+//     t = (getTickCount()-t)/getTickFrequency();
+//     if(veb) cout << " time:" << t << " secs." << endl;
+    
+// }
+
+// LcValidator LcSVM::predict(Mat & feature, Mat & res)
+// {
+// 	Mat label;
+// 	return predict(feature,res,label);
+// }
+
+// LcValidator LcSVM::predict( Mat & feature, Mat & res, Mat & label)
+// {
+//    	int n = feature.rows;
+// 	res = Mat::zeros(n, 1, 5);
+
+// 	for(int i = 0; i< n ; i++)
+// 	{
+// 		res.at<float>(i,0) =  _SVM.predict(feature.row(i));
+// 		//res.at<float>(i,0) =  _random_tree.predict_prob( feature.row(i) );
+// 	}
+
+// 	if( label.rows == feature.rows ){
+// 		return LcValidator( res, label);
+// 	}
+// 	else return LcValidator();
+// }
+
+// void LcSVM::save( string filename_prefix )
+// {
+//     string filename = filename_prefix + "_svm.xml";
+//     _SVM.save( filename.c_str() );
+// }
+
+// void LcSVM::load( string filename_prefix )
+// {
+//     string filename = filename_prefix + "_svm.xml";
+//     _SVM.load( filename.c_str() );
+// }
+
+// void LcSVM::load_full( string full_filename ){
+// 	cout << "  Classifier: Loading " << full_filename << endl;
+// 	_SVM.load( full_filename.c_str());
+// }

@@ -8,7 +8,8 @@ enum FeatureExtractorType{
 	FEAT_SIFT,
 	FEAT_SURF,
 	FEAT_BRIEF,
-	FEAT_ORB	
+	FEAT_ORB,
+	FEAT_GABOR	
 };
 
 
@@ -45,6 +46,9 @@ void LcFeatureExtractor::set_extractor( string setting_string )
 				break;
 			case 'u':
 				bo[FEAT_SURF] = 1;
+				break;
+			case 'g':
+				bo[FEAT_GABOR] = 1;
 				break;
 		}
 	}
@@ -93,6 +97,11 @@ void LcFeatureExtractor::set_extractor( string setting_string )
 	if(bo[FEAT_ORB])
 	{
 		computers.push_back( new LcOrbComputer );
+	}
+
+	if(bo[FEAT_GABOR])
+	{
+		computers.push_back( new LcGaborComputer );
 	}
 
 	for(int i = 0;i<(int)computers.size();i++) computers[i]->veb = veb;
@@ -155,7 +164,6 @@ void LcFeatureExtractor::work(Mat & img, Mat & desc, Mat & img_gt, Mat & lab, in
 	allocate_memory(desc,dims, (int) keypts.size());
 	
 	extract_feature( img, keypts, img_ext, keypts_ext, desc);
-
 	if(img_gt.data) Groundtruth2Label( img_gt, img.size(), keypts, lab);
 	
 }
@@ -264,7 +272,6 @@ void LcFeatureExtractor::extract_feature(
 	{
 		int dim = computers[i]->dim;
 		Mat _desc = desc(cv::Rect(d,0, dim ,data_n));
-
 		if( computers[i]->bound < bound_setting ) computers[i]->compute( img, keypts, _desc);
 		else computers[i]->compute( img_ext , keypts_ext , _desc);
 		d+= dim;
@@ -378,7 +385,6 @@ LcHoGComputer::LcHoGComputer()
 	bound = 10;
 }
 
-
 void LcHoGComputer::compute( Mat & src, vector<KeyPoint> & keypts, Mat & desc)
 {
 	double t = double(getTickCount());
@@ -418,7 +424,6 @@ void LcHoGComputer::compute( Mat & src, vector<KeyPoint> & keypts, Mat & desc)
 		{
 			desc.at<float>(k,i) = hog_desp[id_start];
 			id_start++;
-
 		}
 		
 	}
@@ -434,7 +439,6 @@ LcBRIEFComputer::LcBRIEFComputer()
 	dim = 16;
 	bound = 28;
 }
-
 
 void LcBRIEFComputer::compute( Mat & src, vector<KeyPoint> & keypts, Mat & desc)
 {	
@@ -465,7 +469,6 @@ LcSIFTComputer::LcSIFTComputer()
 	dim = 128;
 	bound = 0;
 }
-
 
 void LcSIFTComputer::compute( Mat & src, vector<KeyPoint> & keypts, Mat & desc)
 {	
@@ -518,16 +521,11 @@ void LcSURFComputer::compute( Mat & src, vector<KeyPoint> & keypts, Mat & desc)
 
 //===============================
 
-
-//===============
-
-
 LcOrbComputer::LcOrbComputer()
 {
 	dim = 32;
 	bound = 31;
 }
-
 
 void LcOrbComputer::compute( Mat & src, vector<KeyPoint> & keypts, Mat & desc)
 {
@@ -551,3 +549,59 @@ void LcOrbComputer::compute( Mat & src, vector<KeyPoint> & keypts, Mat & desc)
 	t = (getTickCount()-t)/getTickFrequency();
 	if(veb) cout << " compute ORB features:" << t << " secs." << endl;
 }
+
+//===============
+
+LcGaborComputer::LcGaborComputer()
+{
+	dim = 16;
+	bound = 1;
+}
+
+void LcGaborComputer::compute( Mat & src, vector<KeyPoint> & keypts, Mat & desc)
+{
+
+	cout << keypts.size() << endl;
+
+	double t = (double)getTickCount();
+	src.convertTo(src, CV_8UC1);
+	
+	float sigma = 1;	float kernel_size = 3;
+	float lamda = sqrt(2);
+	
+	int gaborDimension = 16;
+	int gd = 0; // Will go up to 16
+
+	for(int i=1;i<5;i++){
+		float scale = i*lamda;
+
+		for(int j=1;j<5;j++){
+			float orientation = (j-1)*45;
+
+			cv::Mat kernel = cv::getGaborKernel(cv::Size(kernel_size,kernel_size), sigma, orientation, scale, 1, 0, CV_32F);
+			// cout << "\n" << kernel << endl;
+			Mat singleGaborDesc;
+			cv::filter2D(src, singleGaborDesc, CV_32F, kernel);
+			// stringstream name;
+			// name << "gabor" << (10*i + j) <<".jpg";
+			// imwrite(name.str(), singleGaborDesc);
+			
+			// gabor_desc.push_back(singleGaborDesc);  
+
+			for(int k=0;k<(int)keypts.size();k++)
+			{
+				int r = (int)floor(.5+keypts[k].pt.y);
+				int c = (int)floor(.5+keypts[k].pt.x);
+				// int id_start = (src.rows-1)*r + c;
+				// Mat gaborMat = gabor_desc[gd];
+				// desc.at<float>(k,gd) = gaborMat.at<float>(r,c);
+				desc.at<float>(k,gd) = singleGaborDesc.at<float>(r,c);
+			}
+			gd++;
+		}
+	}
+
+	t = (getTickCount()-t)/getTickFrequency();
+	if(veb) cout << " compute Gabor Features features:" << t << " secs." << endl;
+}
+

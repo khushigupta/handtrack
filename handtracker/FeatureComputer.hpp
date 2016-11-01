@@ -4,18 +4,14 @@
 
 #include <cstring>
 #include <opencv2/opencv.hpp>
-#include <opencv2/flann/config.h>
-
-#include <opencv2/legacy/legacy.hpp>		// EM
+#include <opencv2/flann/config.h>	
 #include <opencv2/contrib/contrib.hpp>		// colormap
 #include <opencv2/nonfree/nonfree.hpp>		// SIFT
-
+#include <opencv2/legacy/legacy.hpp>		// EM
 #include "LcBasic.h"
 
 using namespace std;
 using namespace cv;
-
-
 
 //a father class
 class LcFeatureComputer
@@ -129,13 +125,21 @@ public:
 	void compute( Mat & img, vector<KeyPoint> & keypts, Mat & desc);
 };
 
-
 //====================
 
 class LcOrbComputer: public LcFeatureComputer
 {
 public:
 	LcOrbComputer();
+	void compute( Mat & img, vector<KeyPoint> & keypts, Mat & desc);
+};
+
+//====================
+
+class LcGaborComputer: public LcFeatureComputer
+{
+public:
+	LcGaborComputer();
 	void compute( Mat & img, vector<KeyPoint> & keypts, Mat & desc);
 };
 

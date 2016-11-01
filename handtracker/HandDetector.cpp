@@ -6,7 +6,6 @@
  *  Copyright 2013 __MyCompanyName__. All rights reserved.
  *
  */
-
 #include "HandDetector.hpp"
 
 void HandDetector::loadMaskFilenames(string msk_prefix)
@@ -20,6 +19,158 @@ void HandDetector::loadMaskFilenames(string msk_prefix)
 	while(fs>>val) _filenames.push_back(val);
 }
 
+void HandDetector::clusterImages(string basename, string img_prefix, string msk_prefix, string model_prefix, string globfeat_prefix, string feature_set, int num_clusters, int width)
+{
+	cout << "In HandDetector::clusterImages" << endl;
+
+	stringstream ss;
+	string cmd = "ls " + img_prefix + " > trainImagefilename.txt";
+	system(cmd.c_str());
+	
+	ifstream fs;
+	fs.open("trainImagefilename.txt");
+	string val;
+
+	cout << "Extracting global HSV features" << endl;
+	int f = 101; //used to be -1
+	
+	Mat p = Mat::zeros(0, 64, CV_32F);
+	Mat labels;
+	Mat centers;
+
+	while(fs>>val){
+
+		ss.str("");
+		ss << img_prefix << setw(8) << setfill('0') << f << ".jpg";
+
+		// Load the image
+		Mat color_img = imread(ss.str(),1);
+		if(!color_img.data) cout << "Missing: " << ss.str() << endl;
+		if(!color_img.data) break;
+		
+		// resize the image
+		_img_width = (float)width;
+		_img_height = color_img.rows * (_img_width/color_img.cols);
+		_img_size = Size(_img_width,_img_height);
+		resize(color_img, color_img, _img_size);
+
+		// Calculate the global features
+		Mat globfeat;
+		computeColorHist_HSV(color_img,globfeat);
+		p.push_back(globfeat);
+
+		// Store the global features in files. They'll be used during training
+		ss.str("");
+		ss << globfeat_prefix << "hsv_histogram_" << setw(8) << setfill('0') << f << ".xml";
+		cout << "Writing global feature for: " << ss.str() << endl;
+		
+		FileStorage fs;
+		fs.open(ss.str(),FileStorage::WRITE);
+		fs << "globfeat" << globfeat;
+		fs.release();
+
+		f++;
+	}
+	fs.close();
+
+	// cluster the images
+	cout << "Starting clustering now" << endl;
+	cv::kmeans(p, num_clusters, labels, cv::TermCriteria(CV_TERMCRIT_ITER, 10, 1.0), 3, cv::KMEANS_PP_CENTERS, centers);
+	
+	// here you save the knn to the cluster centers. At test time, the images will be compared to the top k cluster centers
+	ss.str("");
+	ss << "clusters.txt";
+	cout << "Storing cluster centers" << ss.str() << endl;
+
+	FileStorage file;
+	file.open(ss.str(),FileStorage::WRITE);
+	file << "clusters" << centers;
+	file.release();
+
+	// store images according to the clusters they belong to
+	fs.open("trainImagefilename.txt");
+	for (int i = 0; i< num_clusters; i++){
+		ss.str("");
+		ss << "mkdir -p " << globfeat_prefix << "cluster_" << i;
+		system(ss.str().c_str());
+	}
+
+	int i = 0;
+	std::map<string,int> imageToCluster;
+
+	f = 101;
+	while(fs>>val){
+		// store the relavant cluster with the file
+		int idx = labels.at<int>(i,0);
+		imageToCluster[val] = idx;
+		i++;
+
+		// move the global feature files into appropriate clusters.
+		stringstream cmd;
+		cmd.str("");
+		cmd << "mv " << globfeat_prefix << "hsv_histogram_" << setw(8) << setfill('0') << f << ".xml "<< globfeat_prefix << "cluster_" << idx << "/hsv_histogram_" << setw(8) << setfill('0') << f << ".xml"; 
+		system(cmd.str().c_str());
+		cout << cmd.str() << endl;
+		f++;
+	}
+
+	//train one classifier per cluster
+	for (int i = 0; i< num_clusters; i++){
+		LcFeatureExtractor	_extractor;
+		LcRandomTreesR		_classifier;
+		_feature_set = feature_set;
+		_extractor.set_extractor(feature_set);
+		Mat clusterDesc;
+		Mat clusterLab;
+
+		// instead of this we can just cd into the directory and pick up those files
+		for(map<string,int>::iterator it = imageToCluster.begin(); it != imageToCluster.end(); ++it) {
+		  if (it->second == i){
+		  		
+		  		// load the mask image
+		  		ss.str("");
+				ss << msk_prefix << val; // here the file extensions may be different!
+				Mat mask_img = imread(ss.str(),0);
+				if(!mask_img.data) continue;
+				if(countNonZero(mask_img)==0) cout << "Skipping: " << ss.str() << endl;
+				if(countNonZero(mask_img)==0) continue;
+
+				// load the color image
+				ss.str("");
+				ss << img_prefix << val;
+				Mat color_img = imread(ss.str(),1);
+				if(!color_img.data) cout << "Missing: " << ss.str() << endl;
+				if(!color_img.data) break;
+				
+				// resize and convert images for proper format
+				_img_height = color_img.rows * (_img_width/color_img.cols);
+				_img_size = Size(_img_width,_img_height);
+				resize(color_img,color_img,_img_size);
+				vector<KeyPoint> kp;
+				mask_img.convertTo(mask_img,CV_8UC1);
+
+				// extract the features and labels for this image
+				Mat desc;
+				Mat lab;
+				_extractor.work(color_img, desc, mask_img, lab, 1, &kp);
+				clusterDesc.push_back(desc);
+				clusterLab.push_back(lab);
+				cout << desc.rows << endl;
+				cout << desc.cols << endl;
+		  }
+		}
+		cout << endl;
+		cout << clusterDesc.rows << endl;
+		cout << clusterDesc.cols << endl;
+
+		// train and save cluster specific classifier
+		_classifier.train(clusterDesc,clusterLab);
+		ss.str("");
+		ss << model_prefix << "model_" + basename + "_"+ feature_set + "_" << i;
+		_classifier.save(ss.str());
+
+	}
+}
 
 void HandDetector::trainModels(string basename, string img_prefix,string msk_prefix,string model_prefix,string globfeat_prefix, string feature_set, int max_models, int width)
 {
@@ -38,13 +189,13 @@ void HandDetector::trainModels(string basename, string img_prefix,string msk_pre
 	
 	_img_width = (float)width;
 	
-	
 	LcFeatureExtractor	_extractor;
 	LcRandomTreesR		_classifier;
-	
+	// LcSVM _classifier;
+
 	_feature_set = feature_set;
 	_extractor.set_extractor(feature_set);
-	
+
 	//VideoCapture cap(vid_filename);
 	//Mat color_img;
 	
@@ -63,8 +214,7 @@ void HandDetector::trainModels(string basename, string img_prefix,string msk_pre
 		
 		ss.str("");
 		ss << msk_prefix << setw(8) << setfill('0') << f << ".jpg";
-		//ss << msk_prefix << f << ".jpg";
-//        cout << ss.str();
+		
 		Mat mask_img = imread(ss.str(),0);
 
 		if(!mask_img.data) continue;
@@ -73,11 +223,8 @@ void HandDetector::trainModels(string basename, string img_prefix,string msk_pre
 		else cout << "\n  Loading: " << ss.str() << endl;
 		
 		
-		//cap >> color_img;
-		
 		ss.str("");
 		ss << img_prefix << setw(8) << setfill('0') << f << ".jpg";
-		//ss << img_prefix << f+1 << ".jpg"; // one based?
 		Mat color_img = imread(ss.str(),1);
 		if(!color_img.data) cout << "Missing: " << ss.str() << endl;
 		if(!color_img.data) break;
@@ -86,10 +233,8 @@ void HandDetector::trainModels(string basename, string img_prefix,string msk_pre
 		_img_size = Size(_img_width,_img_height);
 		
 		resize(color_img,color_img,_img_size);
-		resize(mask_img,mask_img,_img_size);
 		
-		
-		int VISUALIZE = 1;
+		int VISUALIZE = 0;
 		if(VISUALIZE)
 		{
 			imshow("src",color_img);
@@ -105,7 +250,7 @@ void HandDetector::trainModels(string basename, string img_prefix,string msk_pre
 		
 		//////////////////////////////////////////
 		//										//
-		//		 EXTRACT/SAVE HISTOGRAM			//
+		//		 EXTRACT/SAVE Histogram			//
 		//										//
 		//////////////////////////////////////////
 		
@@ -114,7 +259,7 @@ void HandDetector::trainModels(string basename, string img_prefix,string msk_pre
 		
 		ss.str("");
 		ss << globfeat_prefix << "hsv_histogram_" << k << ".xml";
-		cout << "  Writing global feature: " << ss.str() << endl;
+		cout << "Writing global feature: " << ss.str() << endl;
 		
 		FileStorage fs;
 		fs.open(ss.str(),FileStorage::WRITE);
@@ -141,13 +286,10 @@ void HandDetector::trainModels(string basename, string img_prefix,string msk_pre
 		_classifier.save(ss.str());
 		
 		k++;
-		
 		cout << k << endl;
-		
 	}
 	
 }
-
 
 void HandDetector::testInitialize(string model_prefix,string globfeat_prefix, string feature_set, int knn, int width)
 {
@@ -173,7 +315,7 @@ void HandDetector::testInitialize(string model_prefix,string globfeat_prefix, st
 	//		       LOAD CLASSIFIERS			//
 	//										//
 	//////////////////////////////////////////
-	
+	int num_models;
 	{ // This will only work on linux systems
 		string cmd;
 		cmd = "find " + model_prefix + " -name *.xml -print > modelfilename.txt";
@@ -188,13 +330,15 @@ void HandDetector::testInitialize(string model_prefix,string globfeat_prefix, st
 		string val;
 		while(fs>>val) filenames.push_back(val);
 		
-		int num_models = (int)filenames.size();
+		num_models = (int)filenames.size();
 		
-		cout << "Load class" << endl;
+		cout << "Loading classifiers " << num_models << endl;
 		_classifier = vector<LcRandomTreesR>(num_models);
+		// _classifier = vector<LcSVM>(num_models);
 		
 		for(int i=0;i<num_models;i++)
 		{
+			cout << "Loading model "<< filenames[i] << endl;
 			_classifier[i].load_full(filenames[i]);
 		}
 	}
@@ -202,12 +346,13 @@ void HandDetector::testInitialize(string model_prefix,string globfeat_prefix, st
 	
 	//////////////////////////////////////////
 	//										//
-	//		       LOAD HISTOGRAM			//
+	//		       LOAD Histogram			//
 	//										//
 	//////////////////////////////////////////
 	
 	{
-		string cmd;
+		// If no clustering. Then you use the global features to match, else you use the cluster centers
+		/*string cmd;
 		cmd = "find " + globfeat_prefix + " -name *.xml -print > globfeatfilename.txt";
 		cout << cmd << endl;
 		system(cmd.c_str());
@@ -234,9 +379,18 @@ void HandDetector::testInitialize(string model_prefix,string globfeat_prefix, st
 			
 			_hist_all.push_back(globalfeat);
 			
-		}
+		}*/
+
+		// if clustering, we've already set the _hist_all in the clusterImages function
+		FileStorage fs;
+		fs.open("clusters.txt", FileStorage::READ);
+		fs["clusters"] >> _hist_all;
+		fs.release();
+		cout << _hist_all.size() << endl;
+
 	}
-	
+	cout << _hist_all.size() << endl;
+
 	if(_hist_all.rows != (int)_classifier.size()) cout << "ERROR: Number of classifers doesn't match number of global features.\n";
 	
 	//////////////////////////////////////////
@@ -280,25 +434,23 @@ void HandDetector::test(Mat &img, Mat &dsp, int num_models)
 	int step_size = 1;
 	test(img,dsp,num_models,step_size);
 }
+
 void HandDetector::test(Mat &img, int num_models, int step_size)
 {	
 	Mat tmp = Mat();
 	test(img,tmp,num_models,step_size);
 	
 }
+
 void HandDetector::test(Mat &img, Mat &dsp, int num_models, int step_size)
-{
-	//cout << "HandDetector::test()" << endl;
-	
+{	
 	if(num_models>_knn) return;
 	
-
+	cout << "In test" << endl;
 	_img_height = img.rows * (_img_width/img.cols);
 	_img_size   = Size(_img_width,_img_height);
 		
 	resize(img,img,_img_size);
-	
-	
 	
 	Mat hist;
 	computeColorHist_HSV(img,hist);									// extract hist
@@ -306,17 +458,28 @@ void HandDetector::test(Mat &img, Mat &dsp, int num_models, int step_size)
 	_searchtree.knnSearch(hist,
 						   _indices, _dists, 
 						   _knn, flann::SearchParams(4));			// probe search
-	
-	_extractor.work(img,_descriptors,step_size,&_kp);						// every 3rd pixel
-	
+	Mat lab;
+	if (dsp.data){
+		_extractor.work(img,_descriptors, dsp, lab, &_kp);						// every 3rd pixel
+	}
+	else{
+		_extractor.work(img,_descriptors,step_size,&_kp);
+	}
+
 	if(!_response_avg.data) _response_avg = Mat::zeros(_descriptors.rows,1,CV_32FC1); 
 	else _response_avg *= 0;
-	
+
 	float norm = 0;
 	for(int i=0;i<num_models;i++)
 	{
-		int idx = _indices[i];
-		_classifier[idx].predict(_descriptors,_response_vec);		// run classifier
+		int idx = _indices[i]; // changehere
+
+		if (lab.data){
+			cout << "Have labeled data" << endl;
+			LcValidator model_output = _classifier[idx].predict(_descriptors,_response_vec, lab); // run classifier
+		}
+		else
+			_classifier[idx].predict(_descriptors,_response_vec);
 		
 		_response_avg += _response_vec*float(pow(0.9f,(float)i));
 		norm += float(pow(0.9f,(float)i));
@@ -324,6 +487,9 @@ void HandDetector::test(Mat &img, Mat &dsp, int num_models, int step_size)
 	
 	_response_avg /= norm;
 	
+	LcValidator avgF1 = LcValidator(_response_avg, lab);
+	avgF1.display();
+
 	_sz = img.size();
 	_bs = _extractor.bound_setting;	
 	rasterizeResVec(_response_img,_response_avg,_kp,_sz,_bs);		// class one
@@ -375,7 +541,6 @@ Mat HandDetector::postprocess(Mat &img,vector<Point2f> &pt)
 
 }
 
-
 void HandDetector::rasterizeResVec(Mat &img, Mat&res,vector<KeyPoint> &keypts, cv::Size s, int bs)
 {	
     if((img.rows!=s.height) || (img.cols!=s.width) || (img.type()!=CV_32FC1) ) img = Mat::zeros( s, CV_32FC1);
@@ -387,7 +552,6 @@ void HandDetector::rasterizeResVec(Mat &img, Mat&res,vector<KeyPoint> &keypts, c
 		img.at<float>(r,c) = res.at<float>(i,0);
 	}
 }
-
 
 void HandDetector::colormap(Mat &src, Mat &dst, int do_norm)
 {
@@ -420,7 +584,6 @@ void HandDetector::colormap(Mat &src, Mat &dst, int do_norm)
 	
 	
 }
-
 
 void HandDetector::computeColorHist_HSV(Mat &src, Mat &hist)
 {
@@ -464,4 +627,3 @@ void HandDetector::computeColorHist_HSV(Mat &src, Mat &hist)
 	
 	
 }
-

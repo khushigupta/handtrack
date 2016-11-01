@@ -25,13 +25,14 @@ public:
 	
 	void loadMaskFilenames(string msk_prefix);
 	vector<string> _filenames;
-	
-	void trainModels(string basename, string img_prefix,string msk_prefix,string model_prefix,string feat_prefix, string feature_set, int max_models, int img_width);
+	void clusterImages(string basename, string img_prefix, string msk_prefix, string model_prefix, string globfeat_prefix, string feature_set, int num_clusters, int width);
+	void trainModels(string basename, string img_prefix, string msk_prefix, string model_prefix, string feat_prefix, string feature_set, int max_models, int img_width);
 	string _feature_set;
 	
 	void testInitialize(string model_prefix,string feat_prefix, string feature_set, int knn, int width);
 	
 	vector<LcRandomTreesR>		_classifier;
+	// vector<LcSVM> 				_classifier;
 	vector<int>					_indices; 
 	vector<float>				_dists; 
 	int							_knn;

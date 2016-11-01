@@ -1,5 +1,4 @@
 #include <opencv2/opencv.hpp>
-
 #include "FeatureComputer.hpp"
 #include "Classifier.h"
 #include "LcBasic.h"
@@ -10,21 +9,21 @@ using namespace cv;
 
 int main (int argc, char * const argv[])
 {
-    bool TRAIN_MODEL = 0;           //1 if you are training the models, 0 if you are running the program to predict
-    bool TEST_MODEL  = 1;           //0 if you are training the models, 1 if you are running the program to predict
+    bool TRAIN_MODEL = 1;           //1 if you are training the models, 0 if you are running the program to predict
+    bool TEST_MODEL  = 0;           //0 if you are training the models, 1 if you are running the program to predict
     
-    int target_width = 320;			// for resizing the input (small is faster)
+    int target_width = 360;			// for resizing the input (small is faster)
     
     // maximum number of image masks that you will use
     // must have the masks prepared in advance
     // only used at training time
-    int num_models_to_train = 16;
-    
+    int num_models_to_train = 16; // Here we train one model per image
+    int num_clusters = 4;
     
     // number of models used to compute a single pixel response
-    // must be less than the number of training models
+    // must be less than the number of training models (number of clusters if using clustering or num_models_to_train if not)
     // only used at test time
-    int num_models_to_average = 10;
+    int num_models_to_average = 3;
     
     // runs detector on every 'step_size' pixels
     // only used at test time
@@ -33,8 +32,8 @@ int main (int argc, char * const argv[])
     int step_size = 3;
     
     // Assumes a certain file structure e.g., /root/img/basename/00000000.jpg
-    string root = "/Users/ali/Documents/Development/handtrack/";       //replace with path to your Xcode project
-    string basename = "";
+    string root = "/home/khushig/claireCVPR/handtrack/";       //replace with path to your Xcode project
+    string basename = "GTEA";
     string img_prefix		= root + "img"		+ basename + "/";			// color images
     string msk_prefix		= root + "mask"     + basename + "/";			// binary masks
     string model_prefix		= root + "models"	+ basename + "/";			// output path for learned models
@@ -50,103 +49,85 @@ int main (int argc, char * const argv[])
     // s: SIFT descriptor
     // u: SURF descriptor
     // h: HOG descriptor
-    string feature_set = "rvl";
+    // g: Gabor feature
     
+    string feature_set = "rvl";
     
     
     if(TRAIN_MODEL)
     {
-        cout << "Training...\n";
+        msk_prefix = msk_prefix + "train/"
+        img_prefix = img_prefix + "train/"
+
+        cout << "Training..." << endl;
         HandDetector hd;
         hd.loadMaskFilenames(msk_prefix);
-        hd.trainModels(basename, img_prefix, msk_prefix,model_prefix,globfeat_prefix,feature_set,num_models_to_train,target_width);
-        cout << "Done Training...\n";
+        hd.clusterImages(basename, img_prefix, msk_prefix, model_prefix, globfeat_prefix, feature_set, num_clusters, target_width);
+        //hd.trainModels(basename, img_prefix, msk_prefix, model_prefix,globfeat_prefix,feature_set,num_models_to_train,target_width);
+        cout << "Done Training..." << endl;
     }
-    
     
     
     if(TEST_MODEL)
     {
-        cout << "Testing...\n";
-        string vid_filename		= root + "vid/"		+ basename + ".avi";
+
+        cout << "Testing..." << endl;
         
+        // string root = "/home/khushig/claireCVPR/handtrack/";
+        // string basename = "GTEA";
+        // string vid_filename		= root + "vid/"		+ basename + ".avi";
+        // string model_prefix		= root + "models/"	+ basename + "/";
+        // string globfeat_prefix  = root + "globfeat/"+ basename + "/";
+        // string feature_set = "rvl";
+        
+        int num_models_to_average = 2;
+        
+        msk_prefix = msk_prefix + "test/"
+        img_prefix = img_prefix + "test/"
+        
+        ss.str("");
+        ss << img_prefix << "00000101.jpg";
+        Mat color_img = imread(ss.str(),1);
+        if(!color_img.data) cout << "Missing: " << ss.str() << endl;
+        
+        stringstream ss;
+        ss.str("");
+        ss << msk_prefix << "00000101.jpg";
+
+        Mat mask_img = imread(ss.str(),0);
+        if(countNonZero(mask_img)==0) cout << "Skipping: " << ss.str() << endl;
+        else cout << "\n  Loading: " << ss.str() << endl;
+
+        Mat im = color_img;
+        Mat ppr;
+        resize(im,im,Size(640,360));
+
         HandDetector hd;
         hd.testInitialize(model_prefix,globfeat_prefix,feature_set,num_models_to_average,target_width);
+        hd.test(im, mask_img, num_models_to_average);
         
-        VideoCapture cap(0);
+        resize(hd._ppr,ppr,im.size(),0,0,INTER_LINEAR);
+        addWeighted(im,0.7,ppr,0.3,0,ppr);
+        imshow("result:contour",ppr);
+        imshow("result:probability",hd._blu);
+        waitKey(1);
+
+        /*VideoCapture cap(vid_filename);
         Mat im;
         Mat ppr;
         
-        VideoWriter avi;
-        
         while(1)
         {
-            cap >>(im);
-      
-            if(!im.data) break;
-            //cap >> im; if(!im.data) break; // skip frames with these
-            //cap >> im; if(!im.data) break;
-            //cap >> im; if(!im.data) break;
-            
-            hd.test(im,num_models_to_average,step_size);
-            
-            
-            // Different ways to visualize the results
-            // hd._response_img (float probabilities in a matrix)
-            // hd._blur (blurred version of _response_img)
-            
-            
-            int SHOW_RAW_PROBABILITY = 1;
-            if(SHOW_RAW_PROBABILITY)
-            {
-                Mat raw_prob;
-                hd.colormap(hd._response_img,raw_prob,0);
-                imshow("probability",raw_prob);	// color map of probability
-            }
-            
-            int SHOW_BLUR_PROBABILITY = 1;
-            if(SHOW_BLUR_PROBABILITY)
-            {
-                Mat pp_res;
-                hd.postprocess(hd._response_img);
-                imshow("blurred",hd._blu);		// colormap of blurred probability
-            }
-            
-            int SHOW_BINARY_CONTOUR = 1;
-            if(SHOW_BINARY_CONTOUR)
-            {
-                Mat pp_contour = hd.postprocess(hd._response_img);		// binary contour
-                hd.colormap(pp_contour,pp_contour,0);					// colormap of contour
-                imshow("contour",pp_contour);
-            }
-            
-            int SHOW_RES_ALPHA_BLEND = 1;
-            if(SHOW_RES_ALPHA_BLEND)
-            {
-                Mat pp_res = hd.postprocess(hd._response_img);
-                hd.colormap(pp_res,pp_res,0);
-                resize(pp_res,pp_res,im.size(),0,0,INTER_LINEAR);
-                addWeighted(im,0.7,pp_res,0.3,0,pp_res);				// alpha blend of image and binary contour
-                imshow("alpha_res",pp_res);
-                
-            }
-            
-            
-            /*			
-             if(!avi.isOpened())
-             {
-             stringstream ss;
-             ss.str("");
-             ss << root + "/vis/" + basename + "_skin.avi"; 
-             int fourcc = avi.fourcc('F','L','V','1');
-             avi.open(ss.str(),fourcc,30,ppr.size(),true);
-             }
-             avi << ppr;
-             */
-            
-            
+            cap >> im; if(!im.data) break;
+            cap >> im; if(!im.data) break;
+            resize(im,im,Size(640,360));
+            hd.test(im,num_models_to_average);
+            resize(hd._ppr,ppr,im.size(),0,0,INTER_LINEAR);
+            addWeighted(im,0.7,ppr,0.3,0,ppr);
+            imshow("result:contour",ppr);
+            imshow("result:probability",hd._blu);
             waitKey(1);
-        }
+            
+        }*/
     }
-    
 }

@@ -129,8 +129,9 @@ public:
 
 	void train(Mat & feature, Mat & label);
 
+	LcValidator predict(Mat & feature, Mat & res);
 	LcValidator predict(Mat & feature, Mat & res, Mat & label);
-
+	
 	void save( string filename_prefix );
 	void load( string filename_prefix );
 
@@ -187,11 +188,27 @@ private:
 	void rotate_data( Mat & src, Mat & dst);
 };
 
-
-
 //=================================
 
+// class LcSVM : public LcClassifier
+// {
+// public:
+    
+//     CvSVMParams _params;
+//     CvSVM _SVM;
+    
+//     void train(Mat & feature, Mat & label);
+//     LcValidator predict(Mat & feature, Mat & res);
+//     LcValidator predict(Mat & feature, Mat & res, Mat & label);
+//     void save( string filename_prefix );
+//     void load( string filename_prefix );
+//     void load_full( string full_filename );
+//     LcSVM();    
+//     LcSVM* clone() const{ return new LcSVM(*this);}
+//     void release(){_SVM.clear();}
+// };
 
+//=================================
 //#include "FeatureComputer.h"
 //#include "VideoRead.h"
 //
