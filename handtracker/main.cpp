@@ -9,8 +9,8 @@ using namespace cv;
 
 int main (int argc, char * const argv[])
 {
-    bool TRAIN_MODEL = 1;           //1 if you are training the models, 0 if you are running the program to predict
-    bool TEST_MODEL  = 0;           //0 if you are training the models, 1 if you are running the program to predict
+    bool TRAIN_MODEL = 0;           //1 if you are training the models, 0 if you are running the program to predict
+    bool TEST_MODEL  = 1;           //0 if you are training the models, 1 if you are running the program to predict
     
     int target_width = 360;			// for resizing the input (small is faster)
     
@@ -33,7 +33,7 @@ int main (int argc, char * const argv[])
     
     // Assumes a certain file structure e.g., /root/img/basename/00000000.jpg
     string root = "/home/khushig/claireCVPR/handtrack/";       //replace with path to your Xcode project
-    string basename = "GTEA";
+    string basename = "/GTEA";
     string img_prefix		= root + "img"		+ basename + "/";			// color images
     string msk_prefix		= root + "mask"     + basename + "/";			// binary masks
     string model_prefix		= root + "models"	+ basename + "/";			// output path for learned models
@@ -56,8 +56,8 @@ int main (int argc, char * const argv[])
     
     if(TRAIN_MODEL)
     {
-        msk_prefix = msk_prefix + "train/"
-        img_prefix = img_prefix + "train/"
+        msk_prefix = msk_prefix + "train/";
+        img_prefix = img_prefix + "train/";
 
         cout << "Training..." << endl;
         HandDetector hd;
@@ -81,36 +81,52 @@ int main (int argc, char * const argv[])
         // string feature_set = "rvl";
         
         int num_models_to_average = 2;
-        
-        msk_prefix = msk_prefix + "test/"
-        img_prefix = img_prefix + "test/"
-        
-        ss.str("");
-        ss << img_prefix << "00000101.jpg";
-        Mat color_img = imread(ss.str(),1);
-        if(!color_img.data) cout << "Missing: " << ss.str() << endl;
-        
-        stringstream ss;
-        ss.str("");
-        ss << msk_prefix << "00000101.jpg";
-
-        Mat mask_img = imread(ss.str(),0);
-        if(countNonZero(mask_img)==0) cout << "Skipping: " << ss.str() << endl;
-        else cout << "\n  Loading: " << ss.str() << endl;
-
-        Mat im = color_img;
-        Mat ppr;
-        resize(im,im,Size(640,360));
-
         HandDetector hd;
         hd.testInitialize(model_prefix,globfeat_prefix,feature_set,num_models_to_average,target_width);
-        hd.test(im, mask_img, num_models_to_average);
+
+        msk_prefix = msk_prefix + "test/";
+        img_prefix = img_prefix + "test/";
         
-        resize(hd._ppr,ppr,im.size(),0,0,INTER_LINEAR);
+        string cmd = "ls " + img_prefix + " > testImagefilename.txt";
+        system(cmd.c_str());
+        
+        ifstream fs;
+        fs.open("testImagefilename.txt");
+        string val;
+
+        LcValidator totScore = LcValidator(0,0,0,0);
+        while(fs>>val)   
+        {   
+            stringstream ss;
+
+            ss.str("");
+            ss << img_prefix << val;
+            Mat color_img = imread(ss.str(),1);
+            if(!color_img.data) cout << "Missing: " << ss.str() << endl;
+            
+            ss.str("");
+            ss << msk_prefix << val;
+
+            Mat mask_img = imread(ss.str(),0);
+            if(countNonZero(mask_img)==0) cout << "Skipping: " << ss.str() << endl;
+            else cout << "\n  Loading: " << ss.str() << endl;
+
+            Mat im = color_img;
+            Mat ppr;
+            resize(im,im,Size(640,360));
+
+            LcValidator score;
+            hd.test(im, mask_img, num_models_to_average, 1, score);
+            totScore = totScore + score;
+        }
+
+        totScore.display();
+        
+        /*resize(hd._ppr,ppr,im.size(),0,0,INTER_LINEAR);
         addWeighted(im,0.7,ppr,0.3,0,ppr);
         imshow("result:contour",ppr);
         imshow("result:probability",hd._blu);
-        waitKey(1);
+        waitKey(1);*/
 
         /*VideoCapture cap(vid_filename);
         Mat im;

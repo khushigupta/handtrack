@@ -51,7 +51,8 @@ public:
 	void test(Mat &img,Mat &dsp,int num_models);
 	void test(Mat &img,int num_models, int step_size);
 	void test(Mat &img,Mat &dsp,int num_models, int step_size);
-	
+	void test(Mat &img, Mat &dsp, int num_models, int step_size, LcValidator &avgscore);
+
 	Mat							_descriptors;
 	Mat							_response_vec;
 	Mat							_response_img;

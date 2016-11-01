@@ -64,10 +64,10 @@ void HandDetector::clusterImages(string basename, string img_prefix, string msk_
 		ss << globfeat_prefix << "hsv_histogram_" << setw(8) << setfill('0') << f << ".xml";
 		cout << "Writing global feature for: " << ss.str() << endl;
 		
-		FileStorage fs;
-		fs.open(ss.str(),FileStorage::WRITE);
-		fs << "globfeat" << globfeat;
-		fs.release();
+		FileStorage globalFile;
+		globalFile.open(ss.str(),FileStorage::WRITE);
+		globalFile << "globfeat" << globfeat;
+		globalFile.release();
 
 		f++;
 	}
@@ -75,12 +75,10 @@ void HandDetector::clusterImages(string basename, string img_prefix, string msk_
 
 	// cluster the images
 	cout << "Starting clustering now" << endl;
-	cv::kmeans(p, num_clusters, labels, cv::TermCriteria(CV_TERMCRIT_ITER, 10, 1.0), 3, cv::KMEANS_PP_CENTERS, centers);
+	cv::kmeans(p, num_clusters, labels, cv::TermCriteria(CV_TERMCRIT_ITER, 10, 1.0), 1, cv::KMEANS_PP_CENTERS, centers);
 	
 	// here you save the knn to the cluster centers. At test time, the images will be compared to the top k cluster centers
-	ss.str("");
-	ss << "clusters.txt";
-	cout << "Storing cluster centers" << ss.str() << endl;
+	cout << "Storing cluster centers " << endl;
 
 	FileStorage file;
 	file.open(ss.str(),FileStorage::WRITE);
@@ -128,8 +126,10 @@ void HandDetector::clusterImages(string basename, string img_prefix, string msk_
 		  if (it->second == i){
 		  		
 		  		// load the mask image
+		  		val = it->first;
 		  		ss.str("");
 				ss << msk_prefix << val; // here the file extensions may be different!
+				cout << ss.str() << endl;
 				Mat mask_img = imread(ss.str(),0);
 				if(!mask_img.data) continue;
 				if(countNonZero(mask_img)==0) cout << "Skipping: " << ss.str() << endl;
@@ -155,8 +155,8 @@ void HandDetector::clusterImages(string basename, string img_prefix, string msk_
 				_extractor.work(color_img, desc, mask_img, lab, 1, &kp);
 				clusterDesc.push_back(desc);
 				clusterLab.push_back(lab);
-				cout << desc.rows << endl;
-				cout << desc.cols << endl;
+				cout << desc.size() << endl;
+				cout << lab.size() << endl;
 		  }
 		}
 		cout << endl;
@@ -166,7 +166,7 @@ void HandDetector::clusterImages(string basename, string img_prefix, string msk_
 		// train and save cluster specific classifier
 		_classifier.train(clusterDesc,clusterLab);
 		ss.str("");
-		ss << model_prefix << "model_" + basename + "_"+ feature_set + "_" << i;
+		ss << model_prefix << "model_" + feature_set + "_" << i;
 		_classifier.save(ss.str());
 
 	}
@@ -444,9 +444,8 @@ void HandDetector::test(Mat &img, int num_models, int step_size)
 
 void HandDetector::test(Mat &img, Mat &dsp, int num_models, int step_size)
 {	
-	if(num_models>_knn) return;
+	/*if(num_models>_knn) return;
 	
-	cout << "In test" << endl;
 	_img_height = img.rows * (_img_width/img.cols);
 	_img_size   = Size(_img_width,_img_height);
 		
@@ -490,9 +489,66 @@ void HandDetector::test(Mat &img, Mat &dsp, int num_models, int step_size)
 	LcValidator avgF1 = LcValidator(_response_avg, lab);
 	avgF1.display();
 
-	_sz = img.size();
-	_bs = _extractor.bound_setting;	
-	rasterizeResVec(_response_img,_response_avg,_kp,_sz,_bs);		// class one
+	// _sz = img.size();
+	// _bs = _extractor.bound_setting;	
+	// rasterizeResVec(_response_img,_response_avg,_kp,_sz,_bs);		// class one
+
+	//colormap(_response_img,_raw,1);
+	//vector<Point2f> pt;
+	//_ppr = postprocess(_response_img,pt);
+	//colormap(_ppr,_ppr,1); */
+	LcValidator avgscore;
+	test(img, dsp, num_models, step_size, avgscore);
+}
+
+void HandDetector::test(Mat &img, Mat &dsp, int num_models, int step_size, LcValidator &avgscore)
+{	
+	if(num_models>_knn) return;
+	
+	_img_height = img.rows * (_img_width/img.cols);
+	_img_size   = Size(_img_width,_img_height);
+		
+	resize(img,img,_img_size);
+	
+	Mat hist;
+	computeColorHist_HSV(img,hist);									// extract hist
+	
+	_searchtree.knnSearch(hist,
+						   _indices, _dists, 
+						   _knn, flann::SearchParams(4));			// probe search
+	Mat lab;
+	if (dsp.data){
+		_extractor.work(img,_descriptors, dsp, lab, &_kp);						// every 3rd pixel
+	}
+	else{
+		_extractor.work(img,_descriptors,step_size,&_kp);
+	}
+
+	if(!_response_avg.data) _response_avg = Mat::zeros(_descriptors.rows,1,CV_32FC1); 
+	else _response_avg *= 0;
+
+	float norm = 0;
+	for(int i=0;i<num_models;i++)
+	{
+		int idx = _indices[i]; // changehere
+
+		if (lab.data){
+			LcValidator model_output = _classifier[idx].predict(_descriptors,_response_vec, lab); // run classifier
+		}
+		else
+			_classifier[idx].predict(_descriptors,_response_vec);
+		
+		_response_avg += _response_vec*float(pow(0.9f,(float)i));
+		norm += float(pow(0.9f,(float)i));
+	}
+	
+	_response_avg /= norm;
+	
+	avgscore = LcValidator(_response_avg, lab);
+
+	// _sz = img.size();
+	// _bs = _extractor.bound_setting;	
+	// rasterizeResVec(_response_img,_response_avg,_kp,_sz,_bs);		// class one
 	
 	//colormap(_response_img,_raw,1);
 	//vector<Point2f> pt;
